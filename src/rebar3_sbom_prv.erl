@@ -5,7 +5,8 @@
 -define(PROVIDER, sbom).
 -define(DEPS, [lock]).
 
--define(OUTPUT, "bom.xml").
+-define(OUTPUT, "bom.json").
+-define(DEFAULT_TYPE, json).
 
 %% ===================================================================
 %% Public API
@@ -21,7 +22,8 @@ init(State) ->
             {opts, [                      % list of options understood by the plugin
               {output, $o, "output", {string, ?OUTPUT}, "the full path to the SBoM output file"},
               {force, $f, "force", {boolean, false}, "overwite existing files without prompting for confirmation"},
-              {strict_version, $V, "strict_version", {boolean, true}, "modify the version number of the bom only when the content changes"}
+              {strict_version, $V, "strict_version", {boolean, true}, "modify the version number of the bom only when the content changes"},
+              {type, $t, "type", {atom, json}, "The type of output file, could be json or xml"}
             ]},
             {short_desc, "Generates CycloneDX SBoM"},
             {desc, "Generates a Software Bill-of-Materials (SBoM) in CycloneDX format"}
@@ -35,8 +37,9 @@ do(State) ->
     Force = proplists:get_value(force, Args),
     Deps = rebar_state:all_deps(State),
     DepsInfo = [dep_info(Dep) || Dep <- Deps],
-    Xml = rebar3_sbom_cyclonedx:bom(Output, DepsInfo, Args),
-    case write_file(Output, Xml, Force) of
+    Encoder = select_encoder(Args),
+    Content = Encoder:bom(Output, DepsInfo, Args),
+    case write_file(Output, Content, Force) of
         ok ->
             rebar_api:info("CycloneDX SBoM written to ~s", [Output]),
             {ok, State};
@@ -106,20 +109,28 @@ dep_info(Name, Version, {git, Git, {ref, Ref}}, _Dir, Details, Deps) ->
 dep_info(_Name, _Version, _Source, _Dir, _Details, _Deps) ->
     undefined.
 
-write_file(Filename, Xml, true) ->
-    file:write_file(Filename, Xml);
+write_file(Filename, Data, true) ->
+    file:write_file(Filename, Data);
 
-write_file(Filename, Xml, false) ->
+write_file(Filename, Data, false) ->
     case file:read_file_info(Filename) of
         {error, enoent} ->
-            write_file(Filename, Xml, true);
+            write_file(Filename, Data, true);
         {ok, _FileInfo} ->
             Prompt = io_lib:format("File ~s exists; overwrite? [Y/N] ", [Filename]),
             case io:get_line(Prompt) of
-                "y\n" -> write_file(Filename, Xml, true);
-                "Y\n" -> write_file(Filename, Xml, true);
+                "y\n" -> write_file(Filename, Data, true);
+                "Y\n" -> write_file(Filename, Data, true);
                 _ -> {error, "Aborted"}
             end;
         Error ->
             Error
+    end.
+
+select_encoder(Opts) ->
+    case proplists:get_value(type, Opts, ?DEFAULT_TYPE) of
+        json ->
+            rebar3_sbom_cyclonedx_json;
+        _ ->
+            rebar3_sbom_cyclonedx
     end.
