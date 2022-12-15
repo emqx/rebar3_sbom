@@ -23,7 +23,8 @@ init(State) ->
               {output, $o, "output", {string, ?OUTPUT}, "the full path to the SBoM output file"},
               {force, $f, "force", {boolean, false}, "overwite existing files without prompting for confirmation"},
               {strict_version, $V, "strict_version", {boolean, true}, "modify the version number of the bom only when the content changes"},
-              {type, $t, "type", {atom, json}, "The type of output file, could be json or xml"}
+              {type, $t, "type", {atom, json}, "The type of output file, could be json or xml"},
+              {merge, $m, "merge", string, "Merge bom files into one, this option can be multiple."}
             ]},
             {short_desc, "Generates CycloneDX SBoM"},
             {desc, "Generates a Software Bill-of-Materials (SBoM) in CycloneDX format"}
@@ -35,10 +36,15 @@ do(State) ->
     {Args, _} = rebar_state:command_parsed_args(State),
     Output = proplists:get_value(output, Args),
     Force = proplists:get_value(force, Args),
-    Deps = rebar_state:all_deps(State),
-    DepsInfo = [dep_info(Dep) || Dep <- Deps],
     Encoder = select_encoder(Args),
-    Content = Encoder:bom(Output, DepsInfo, Args),
+    case proplists:get_value(merge, Args) of
+        undefined ->
+            Deps = rebar_state:all_deps(State),
+            DepsInfo = [dep_info(Dep) || Dep <- Deps],
+            Content = Encoder:bom(Output, DepsInfo, Args);
+        _ ->
+            Content = Encoder:merge(Args)
+    end,
     case write_file(Output, Content, Force) of
         ok ->
             rebar_api:info("CycloneDX SBoM written to ~s", [Output]),
